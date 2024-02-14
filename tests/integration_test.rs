@@ -1,4 +1,5 @@
 use passtool::*;
+use serial_test::serial;
 
 #[test]
 fn passtable_test() -> Result<(), Error>{
@@ -83,5 +84,31 @@ fn incorrect_password_encrypt_test2() -> Result<(), aes_gcm_siv::Error>{
     let cypher = encrypt(&message, password)?;
     let message2 = decrypt(&cypher, password2);
     assert!(message2.is_err());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn save_test() -> Result<(), Box<dyn std::error::Error>> {
+    let mut pt = PassTable::new();
+    pt.add_password("pass1", "test1", "password1")?;
+    pt.add_password("pass2", "test2", "password2")?;
+    pt.add_password("pass3", "test3", "password3")?;
+    pt.to_file("passwords.pt")?;
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn save_and_load_test() -> Result<(), Box<dyn std::error::Error>> {
+    let mut pt = PassTable::new();
+    pt.add_password("pass1", "test1", "password1")?;
+    pt.add_password("pass2", "test2", "password2")?;
+    pt.add_password("pass3", "test3", "password3")?;
+    pt.to_file("passwords.pt")?;
+
+    let pt2 = PassTable::from_file("passwords.pt")?;
+    assert_eq!(pt, pt2);
+    assert_eq!("test3", pt2.get_password("pass3", "password3")?);
     Ok(())
 }

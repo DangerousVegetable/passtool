@@ -1,5 +1,6 @@
 use core::fmt;
-
+use std::fs;
+use std::error;
 use std::collections::HashMap;
 
 use hex_literal::hex;
@@ -26,13 +27,15 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PassExists => f.write_str("Password already exists"),
-            Self::PassNotFound => f.write_str("Password not found"),
-            Self::IncorrectPass => f.write_str("Incorrect password"),
-            Self::AES => f.write_str("AES Error")
+            Self::PassExists => f.write_str("password already exists"),
+            Self::PassNotFound => f.write_str("password not found"),
+            Self::IncorrectPass => f.write_str("incorrect password"),
+            Self::AES => f.write_str("aes error")
         }
     }
 }
+
+impl std::error::Error for Error {}
 
 pub type PassHasher = Sha256;
 pub type PassCypher = Aes256GcmSiv;
@@ -78,6 +81,30 @@ impl PassTable {
         PassTable { passwords: HashMap::new() }
     }
 
+    fn encoded(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    fn init_from_binary(&mut self, encoded: &[u8]) {
+        *self = bincode::deserialize(encoded).unwrap();
+    }
+
+    pub fn from_binary(encoded: &[u8]) -> Result<Self, Box<dyn std::error::Error>>  {
+        let table: Self = bincode::deserialize(encoded)?;
+        Ok(table)
+    }
+
+    pub fn from_file(filename: &str) -> Result<Self, Box<dyn std::error::Error>>  {
+        let encoded = fs::read(filename)?;
+        PassTable::from_binary(&encoded)
+    }
+
+    pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>>{
+        let encoded = self.encoded();
+        fs::write(filename, encoded)?;
+        Ok(())
+    }
+
     fn get_cypher(&self, name: &str) -> Option<&Vec<u8>> {
         self.passwords.get(name)
     }
@@ -103,19 +130,20 @@ impl PassTable {
 #[cfg(test)]
 mod tests{
     use super::*;
-    
+
     #[test]
+    #[ignore]
     fn serialize_test() -> Result<(), Error>{
         let mut pt = PassTable::new();
         pt.add_password("pass1", "test1", "password1")?;
         pt.add_password("pass2", "test2", "password2")?;
         pt.add_password("pass3", "test3", "password3")?;
 
-        let encoded: Vec<u8> = bincode::serialize(&pt).unwrap();
+        let encoded = pt.encoded();
         println!("{:?}", encoded);
-        let decoded: PassTable = bincode::deserialize(&encoded[..]).unwrap();
-        assert_eq!(pt, decoded);
-        let pass = decoded.get_password("pass2", "password2")?;
+        let pt2 = PassTable::from_binary(&encoded).unwrap();
+        assert_eq!(pt, pt2);
+        let pass = pt2.get_password("pass2", "password2")?;
         assert_eq!(pass, "test2");
         Ok(())
     }
