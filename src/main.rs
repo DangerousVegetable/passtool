@@ -12,6 +12,8 @@ use aes_gcm_siv::{
     Aes256GcmSiv, Nonce
 };
 
+use serde::{Serialize, Deserialize};
+
 
 mod passtable{
     use super::*;
@@ -19,8 +21,8 @@ mod passtable{
     pub use Error::*;
     #[derive(Debug, PartialEq)]
     pub enum Error {
-        PassAlreadyExists(String),
-        PassNotFound(String), 
+        PassExists,
+        PassNotFound, 
         IncorrectPass,
         AES
     }
@@ -28,13 +30,16 @@ mod passtable{
     impl fmt::Display for Error {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                Self::PassAlreadyExists(name) => f.write_str(&format!("Password with the name \"{}\" already exists", name)),
-                Self::PassNotFound(name) => f.write_str(&format!("Password with the name \"{}\" doesn't exist", name)),
+                Self::PassExists => f.write_str("Password already exists"),
+                Self::PassNotFound => f.write_str("Password not found"),
                 Self::IncorrectPass => f.write_str("Incorrect password"),
                 Self::AES => f.write_str("AES Error")
             }
         }
     }
+
+    pub type PassHasher = Sha256;
+    pub type PassCypher = Aes256GcmSiv;
 
     pub fn nonce_from_password<D: Digest>(password: &str) -> Nonce {
         let mut hasher = D::new();
@@ -52,21 +57,22 @@ mod passtable{
     }
 
     pub fn encrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv::Error>{
-        let key = key_from_password::<Sha256, Aes256GcmSiv>(password);
-        let cipher = Aes256GcmSiv::new(&key);
-        let nonce = nonce_from_password::<Sha256>(password);
+        let key = key_from_password::<PassHasher, PassCypher>(password);
+        let cipher = PassCypher::new(&key);
+        let nonce = nonce_from_password::<PassHasher>(password);
         
         cipher.encrypt(&nonce, message)
     }
 
     pub fn decrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv::Error>{
-        let key = key_from_password::<Sha256, Aes256GcmSiv>(password);
-        let cipher = Aes256GcmSiv::new(&key);
-        let nonce = nonce_from_password::<Sha256>(password);
+        let key = key_from_password::<PassHasher, PassCypher>(password);
+        let cipher = PassCypher::new(&key);
+        let nonce = nonce_from_password::<PassHasher>(password);
         
         cipher.decrypt(&nonce, message)
     }
     
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     pub struct PassTable {
         passwords: HashMap<String, Vec<u8>>
     }
@@ -84,16 +90,16 @@ mod passtable{
             self.passwords.insert(name, cypher);
         }
 
-        pub fn get_password(&self, name: &String, password: &str) -> Result<String, passtable::Error> {
-            let cypher = self.get_cypher(name).ok_or(passtable::PassNotFound(name.clone()))?;
-            let message = passtable::decrypt(cypher, password).or(Err(passtable::IncorrectPass))?;
-            String::from_utf8(message).or(Err(passtable::AES))
+        pub fn get_password(&self, name: &str, key: &str) -> Result<String, passtable::Error> {
+            let cypher = self.get_cypher(name).ok_or(passtable::PassNotFound)?;
+            let password = passtable::decrypt(cypher, key).or(Err(passtable::IncorrectPass))?;
+            String::from_utf8(password).or(Err(passtable::AES))
         }
 
-        pub fn add_password(&mut self, name: &String, message: &str, password: &str) -> Result<(), passtable::Error>{
-            if self.passwords.contains_key(name) {return Err(passtable::PassAlreadyExists(name.clone()))}
-            let cypher = passtable::encrypt(message.as_bytes(), password).or(Err(passtable::AES))?;
-            self.add_cypher(name.clone(), cypher);
+        pub fn add_password(&mut self, name: &str, password: &str, key: &str) -> Result<(), passtable::Error>{
+            if self.passwords.contains_key(name) {return Err(passtable::PassExists)}
+            let cypher = passtable::encrypt(password.as_bytes(), key).or(Err(passtable::AES))?;
+            self.add_cypher(String::from(name), cypher);
             Ok(())
         }
     }
@@ -160,7 +166,19 @@ mod tests{
         let name = String::from("test");
         pt.add_password(&name, message, password)?;
         let pass = pt.get_password(&"test2".to_string(), "bebra");
-        assert!(pass.is_err_and(|x| if let passtable::PassNotFound(_) = x {true} else {false}));
+        assert!(pass.is_err_and(|x| if let passtable::PassNotFound = x {true} else {false}));
+        Ok(())
+    }
+
+    #[test]
+    fn alredy_exists_passtable_test() -> Result<(), passtable::Error>{
+        let message = "super secret message";
+        let password = "super secret password";
+        let mut pt = PassTable::new();
+        let name = String::from("test");
+        pt.add_password(&name, message, password)?;
+        let res = pt.add_password(&name, message, password);
+        assert!(res.is_err_and(|x| if let passtable::PassExists = x {true} else {false}));
         Ok(())
     }
 
@@ -183,6 +201,43 @@ mod tests{
         let message2 = passtable::decrypt(&cypher, password2);
         assert!(message2.is_err());
         Ok(())
+    }
+
+    #[test]
+    fn serialize_test() -> Result<(), passtable::Error>{
+        let mut pt = PassTable::new();
+        pt.add_password("pass1", "test1", "password1")?;
+        pt.add_password("pass2", "test2", "password2")?;
+        pt.add_password("pass3", "test3", "password3")?;
+
+        let encoded: Vec<u8> = bincode::serialize(&pt).unwrap();
+        println!("{:?}", encoded);
+        let decoded: PassTable = bincode::deserialize(&encoded[..]).unwrap();
+        assert_eq!(pt, decoded);
+        let pass = decoded.get_password("pass2", "password2")?;
+        assert_eq!(pass, "test2");
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn simple_serialize_test(){
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Entity {
+            x: f32,
+            y: f32,
+        }
+
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct World(Vec<Entity>);
+
+        let world = World(vec![Entity { x: 0.0, y: 4.0 }, Entity { x: 10.0, y: 20.5 }]);
+        let encoded: Vec<u8> = bincode::serialize(&world).unwrap();
+        //println!("{:?}", encoded);
+        // 8 bytes for the length of the vector, 4 bytes per float.
+        assert_eq!(encoded.len(), 8 + 4 * 4);
+        let decoded: World = bincode::deserialize(&encoded[..]).unwrap();
+        assert_eq!(world, decoded);
     }
 
     #[test]

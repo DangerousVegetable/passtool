@@ -185,6 +185,7 @@ dependencies = [
  "bincode",
  "hex-literal",
  "random-string",
+ "serde",
  "sha2",
 ]
 
