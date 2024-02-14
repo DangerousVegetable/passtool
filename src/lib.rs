@@ -14,103 +14,99 @@ use aes_gcm_siv::{
 
 use serde::{Serialize, Deserialize};
 
-pub mod passtable{
-    use super::*;
+pub use Error::*;
+#[derive(Debug, PartialEq)]
+pub enum Error {
+    PassExists,
+    PassNotFound, 
+    IncorrectPass,
+    AES
+}
 
-    pub use Error::*;
-    #[derive(Debug, PartialEq)]
-    pub enum Error {
-        PassExists,
-        PassNotFound, 
-        IncorrectPass,
-        AES
-    }
-
-    impl fmt::Display for Error {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            match self {
-                Self::PassExists => f.write_str("Password already exists"),
-                Self::PassNotFound => f.write_str("Password not found"),
-                Self::IncorrectPass => f.write_str("Incorrect password"),
-                Self::AES => f.write_str("AES Error")
-            }
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PassExists => f.write_str("Password already exists"),
+            Self::PassNotFound => f.write_str("Password not found"),
+            Self::IncorrectPass => f.write_str("Incorrect password"),
+            Self::AES => f.write_str("AES Error")
         }
     }
+}
 
-    pub type PassHasher = Sha256;
-    pub type PassCypher = Aes256GcmSiv;
+pub type PassHasher = Sha256;
+pub type PassCypher = Aes256GcmSiv;
 
-    pub fn nonce_from_password<D: Digest>(password: &str) -> Nonce {
-        let mut hasher = D::new();
-        hasher.update(password.as_bytes());
-        hasher.update(b"nonce");
-        *Nonce::from_slice(&hasher.finalize()[..12])
-    }
+pub fn nonce_from_password<D: Digest>(password: &str) -> Nonce {
+    let mut hasher = D::new();
+    hasher.update(password.as_bytes());
+    hasher.update(b"nonce");
+    *Nonce::from_slice(&hasher.finalize()[..12])
+}
 
-    pub fn key_from_password<D: Digest, K : KeyInit>(password: &str) -> Key<K> {
-        let mut hasher = D::new();
-        hasher.update(password.as_bytes());
-        hasher.update(b"password");
-        let len : usize = K::KeySize::to_usize();
-        Key::<K>::from_slice(&hasher.finalize()[..len]).clone()
-    }
+pub fn key_from_password<D: Digest, K : KeyInit>(password: &str) -> Key<K> {
+    let mut hasher = D::new();
+    hasher.update(password.as_bytes());
+    hasher.update(b"password");
+    let len : usize = K::KeySize::to_usize();
+    Key::<K>::from_slice(&hasher.finalize()[..len]).clone()
+}
 
-    pub fn encrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv::Error>{
-        let key = key_from_password::<PassHasher, PassCypher>(password);
-        let cipher = PassCypher::new(&key);
-        let nonce = nonce_from_password::<PassHasher>(password);
-        
-        cipher.encrypt(&nonce, message)
-    }
-
-    pub fn decrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv::Error>{
-        let key = key_from_password::<PassHasher, PassCypher>(password);
-        let cipher = PassCypher::new(&key);
-        let nonce = nonce_from_password::<PassHasher>(password);
-        
-        cipher.decrypt(&nonce, message)
-    }
+pub fn encrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv::Error>{
+    let key = key_from_password::<PassHasher, PassCypher>(password);
+    let cipher = PassCypher::new(&key);
+    let nonce = nonce_from_password::<PassHasher>(password);
     
-    #[derive(Serialize, Deserialize, PartialEq, Debug)]
-    pub struct PassTable {
-        passwords: HashMap<String, Vec<u8>>
+    cipher.encrypt(&nonce, message)
+}
+
+pub fn decrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv::Error>{
+    let key = key_from_password::<PassHasher, PassCypher>(password);
+    let cipher = PassCypher::new(&key);
+    let nonce = nonce_from_password::<PassHasher>(password);
+    
+    cipher.decrypt(&nonce, message)
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct PassTable {
+    passwords: HashMap<String, Vec<u8>>
+}
+
+impl PassTable {
+    pub fn new() -> Self {
+        PassTable { passwords: HashMap::new() }
     }
-    
-    impl PassTable {
-        pub fn new() -> Self {
-            PassTable { passwords: HashMap::new() }
-        }
-    
-        fn get_cypher(&self, name: &str) -> Option<&Vec<u8>> {
-            self.passwords.get(name)
-        }
 
-        fn add_cypher(&mut self, name: String, cypher: Vec<u8>) {
-            self.passwords.insert(name, cypher);
-        }
+    fn get_cypher(&self, name: &str) -> Option<&Vec<u8>> {
+        self.passwords.get(name)
+    }
 
-        pub fn get_password(&self, name: &str, key: &str) -> Result<String, passtable::Error> {
-            let cypher = self.get_cypher(name).ok_or(passtable::PassNotFound)?;
-            let password = passtable::decrypt(cypher, key).or(Err(passtable::IncorrectPass))?;
-            String::from_utf8(password).or(Err(passtable::AES))
-        }
+    fn add_cypher(&mut self, name: String, cypher: Vec<u8>) {
+        self.passwords.insert(name, cypher);
+    }
 
-        pub fn add_password(&mut self, name: &str, password: &str, key: &str) -> Result<(), passtable::Error>{
-            if self.passwords.contains_key(name) {return Err(passtable::PassExists)}
-            let cypher = passtable::encrypt(password.as_bytes(), key).or(Err(passtable::AES))?;
-            self.add_cypher(String::from(name), cypher);
-            Ok(())
-        }
+    pub fn get_password(&self, name: &str, key: &str) -> Result<String, Error> {
+        let cypher = self.get_cypher(name).ok_or(PassNotFound)?;
+        let password = decrypt(cypher, key).or(Err(IncorrectPass))?;
+        String::from_utf8(password).or(Err(AES))
+    }
+
+    pub fn add_password(&mut self, name: &str, password: &str, key: &str) -> Result<(), Error>{
+        if self.passwords.contains_key(name) {return Err(PassExists)}
+        let cypher = encrypt(password.as_bytes(), key).or(Err(AES))?;
+        self.add_cypher(String::from(name), cypher);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests{
     use super::*;
-    use super::passtable::*;
+    use super::*;
 
     #[test]
-    fn passtable_test() -> Result<(), passtable::Error>{
+    fn passtable_test() -> Result<(), Error>{
         let message = "super secret message";
         let password = "super secret password";
         let mut pt = PassTable::new();
@@ -122,7 +118,7 @@ mod tests{
     }
 
     #[test]
-    fn passtable_test2() -> Result<(), passtable::Error>{
+    fn passtable_test2() -> Result<(), Error>{
         use random_string::generate;
         let charset = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -140,37 +136,37 @@ mod tests{
     }
 
     #[test]
-    fn incorrect_password_passtable_test() -> Result<(), passtable::Error>{
+    fn incorrect_password_passtable_test() -> Result<(), Error>{
         let message = "super secret message";
         let password = "super secret password";
         let mut pt = PassTable::new();
         let name = String::from("test");
         pt.add_password(&name, message, password)?;
         let pass = pt.get_password(&name, "bebra");
-        assert!(pass.is_err_and(|x| x == passtable::IncorrectPass));
+        assert!(pass.is_err_and(|x| x == IncorrectPass));
         Ok(())
     }
     #[test]
-    fn not_found_passtable_test() -> Result<(), passtable::Error>{
+    fn not_found_passtable_test() -> Result<(), Error>{
         let message = "super secret message";
         let password = "super secret password";
         let mut pt = PassTable::new();
         let name = String::from("test");
         pt.add_password(&name, message, password)?;
         let pass = pt.get_password(&"test2".to_string(), "bebra");
-        assert!(pass.is_err_and(|x| if let passtable::PassNotFound = x {true} else {false}));
+        assert!(pass.is_err_and(|x| if let PassNotFound = x {true} else {false}));
         Ok(())
     }
 
     #[test]
-    fn alredy_exists_passtable_test() -> Result<(), passtable::Error>{
+    fn alredy_exists_passtable_test() -> Result<(), Error>{
         let message = "super secret message";
         let password = "super secret password";
         let mut pt = PassTable::new();
         let name = String::from("test");
         pt.add_password(&name, message, password)?;
         let res = pt.add_password(&name, message, password);
-        assert!(res.is_err_and(|x| if let passtable::PassExists = x {true} else {false}));
+        assert!(res.is_err_and(|x| if let PassExists = x {true} else {false}));
         Ok(())
     }
 
@@ -178,8 +174,8 @@ mod tests{
     fn password_encrypt_test() -> Result<(), aes_gcm_siv::Error>{
         let password = "super secret password";
         let message = Vec::from(b"Hello world!");
-        let cypher = passtable::encrypt(&message, password)?;
-        let message2 = passtable::decrypt(&cypher, password)?;
+        let cypher = encrypt(&message, password)?;
+        let message2 = decrypt(&cypher, password)?;
         assert_eq!(&message, &message2);
         Ok(())
     }
@@ -189,14 +185,14 @@ mod tests{
         let password = "super secret password";
         let password2 = "super not secret password";
         let message = Vec::from(b"Hello world!");
-        let cypher = passtable::encrypt(&message, password)?;
-        let message2 = passtable::decrypt(&cypher, password2);
+        let cypher = encrypt(&message, password)?;
+        let message2 = decrypt(&cypher, password2);
         assert!(message2.is_err());
         Ok(())
     }
 
     #[test]
-    fn serialize_test() -> Result<(), passtable::Error>{
+    fn serialize_test() -> Result<(), Error>{
         let mut pt = PassTable::new();
         pt.add_password("pass1", "test1", "password1")?;
         pt.add_password("pass2", "test2", "password2")?;
@@ -238,7 +234,7 @@ mod tests{
         let key = Aes256GcmSiv::generate_key(&mut OsRng);
         //println!("{:?}", key);
         let cipher = Aes256GcmSiv::new(&key);
-        let nonce = &passtable::nonce_from_password::<Sha256>("xd");
+        let nonce = &nonce_from_password::<Sha256>("xd");
         
         let ciphertext = cipher.encrypt(nonce, "plaintext message".as_ref())?;
         let plaintext = cipher.decrypt(nonce, ciphertext.as_ref())?;
@@ -251,10 +247,10 @@ mod tests{
     #[ignore]
     fn create_pass_test() -> Result<(), aes_gcm_siv::Error>{
         let password = "xd";
-        let key = passtable::key_from_password::<Sha256, Aes256GcmSiv>(password);
+        let key = key_from_password::<Sha256, Aes256GcmSiv>(password);
         //println!("{:?}", key);
         let cipher = Aes256GcmSiv::new(&key);
-        let nonce = &passtable::nonce_from_password::<Sha256>(password);
+        let nonce = &nonce_from_password::<Sha256>(password);
         
         let ciphertext = cipher.encrypt(nonce, b"plaintext message".as_ref())?;
         let plaintext = cipher.decrypt(nonce, ciphertext.as_ref())?;
