@@ -85,10 +85,6 @@ impl PassTable {
         bincode::serialize(self).unwrap()
     }
 
-    fn init_from_binary(&mut self, encoded: &[u8]) {
-        *self = bincode::deserialize(encoded).unwrap();
-    }
-
     pub fn from_binary(encoded: &[u8]) -> Result<Self, Box<dyn std::error::Error>>  {
         let table: Self = bincode::deserialize(encoded)?;
         Ok(table)
@@ -109,6 +105,11 @@ impl PassTable {
         self.passwords.get(name)
     }
 
+    fn remove_cypher(&mut self, name: &str) -> Result<(), Error> {
+        self.passwords.remove(name).ok_or(Error::PassNotFound)?;
+        Ok(())
+    }
+
     fn add_cypher(&mut self, name: String, cypher: Vec<u8>) {
         self.passwords.insert(name, cypher);
     }
@@ -124,6 +125,10 @@ impl PassTable {
         let cypher = encrypt(password.as_bytes(), key).or(Err(AES))?;
         self.add_cypher(String::from(name), cypher);
         Ok(())
+    }
+
+    pub fn remove_password(&mut self, name: &str) -> Result<(), Error> {
+        self.remove_cypher(name)
     }
 }
 

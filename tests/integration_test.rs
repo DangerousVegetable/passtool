@@ -14,6 +14,18 @@ fn passtable_test() -> Result<(), Error>{
 }
 
 #[test]
+fn remove_test() -> Result<(), Error>{
+    let mut pt = PassTable::new();
+    pt.add_password("test", "password", "1234")?;
+    pt.add_password("test2", "password2", "1234")?;
+    pt.remove_password("test")?;
+    assert!(pt.get_password("test", "1234").is_err_and(|x| x == PassNotFound));
+    assert_eq!(pt.get_password("test2", "1234").unwrap(), "password2");
+    assert!(pt.remove_password("test").is_err_and(|x| x == PassNotFound));
+    Ok(())
+}
+
+#[test]
 fn passtable_test2() -> Result<(), Error>{
     use random_string::generate;
     let charset = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
