@@ -1,6 +1,5 @@
 use core::fmt;
 use std::fs;
-use std::error;
 use std::collections::HashMap;
 
 use hex_literal::hex;
@@ -9,7 +8,7 @@ use sha2::{Sha256, Sha512, Digest};
 use sha2::digest::typenum::Unsigned;
 
 use aes_gcm_siv::{
-    aead::{Aead, KeyInit, Key, OsRng},
+    aead::{Aead, KeyInit, Key},
     Aes256GcmSiv, Nonce
 };
 
@@ -71,9 +70,37 @@ pub fn decrypt(message : &[u8], password : &str) -> Result<Vec<u8>, aes_gcm_siv:
     cipher.decrypt(&nonce, message)
 }
 
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PasswordMeta {
+    pub description: String,
+    pub apps: Vec<String>
+}
+
+impl PasswordMeta {
+    pub fn new(description: String, apps: Vec<String>) -> Self {
+        Self{description, apps}
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct Password {
+    cypher: Vec<u8>,
+    meta: PasswordMeta
+}
+
+impl Password {
+    pub fn from_cypher(cypher: Vec<u8>) -> Self{
+        Password{cypher, meta: Default::default()}
+    }
+
+    pub fn update_meta(&mut self, meta: PasswordMeta) {
+        self.meta = meta;
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct PassTable {
-    passwords: HashMap<String, Vec<u8>>
+    passwords: HashMap<String, Password>
 }
 
 impl PassTable {
@@ -101,7 +128,7 @@ impl PassTable {
         Ok(())
     }
 
-    fn get_cypher(&self, name: &str) -> Option<&Vec<u8>> {
+    fn get_cypher(&self, name: &str) -> Option<&Password> {
         self.passwords.get(name)
     }
 
@@ -110,20 +137,31 @@ impl PassTable {
         Ok(())
     }
 
-    fn add_cypher(&mut self, name: String, cypher: Vec<u8>) {
-        self.passwords.insert(name, cypher);
+    fn add_cypher(&mut self, name: String, cypher: Vec<u8>, meta: PasswordMeta) {
+        self.passwords.insert(name, Password{cypher, meta});
     }
 
     pub fn get_password(&self, name: &str, key: &str) -> Result<String, Error> {
         let cypher = self.get_cypher(name).ok_or(PassNotFound)?;
-        let password = decrypt(cypher, key).or(Err(IncorrectPass))?;
+        let password = decrypt(&cypher.cypher, key).or(Err(IncorrectPass))?;
         String::from_utf8(password).or(Err(AES))
     }
 
-    pub fn add_password(&mut self, name: &str, password: &str, key: &str) -> Result<(), Error>{
+    pub fn add_password(&mut self, name: &str, password: &str, meta: PasswordMeta, key: &str) -> Result<(), Error>{
         if self.passwords.contains_key(name) {return Err(PassExists)}
         let cypher = encrypt(password.as_bytes(), key).or(Err(AES))?;
-        self.add_cypher(String::from(name), cypher);
+        self.add_cypher(String::from(name), cypher, meta);
+        Ok(())
+    }
+
+    pub fn get_metadata(&self, name: &str) -> Result<&PasswordMeta, Error> {
+        let p = self.get_cypher(name).ok_or(Error::PassNotFound)?;
+        Ok(&p.meta)
+    }
+
+    pub fn update_metadata(&mut self, name: &str, meta: PasswordMeta) -> Result<(), Error> {
+        let p = self.passwords.get_mut(name).ok_or(Error::PassNotFound)?;
+        p.update_meta(meta);
         Ok(())
     }
 
@@ -140,9 +178,9 @@ mod tests{
     #[ignore]
     fn serialize_test() -> Result<(), Error>{
         let mut pt = PassTable::new();
-        pt.add_password("pass1", "test1", "password1")?;
-        pt.add_password("pass2", "test2", "password2")?;
-        pt.add_password("pass3", "test3", "password3")?;
+        pt.add_password("pass1", "test1", PasswordMeta::default(), "password1")?;
+        pt.add_password("pass2", "test2", PasswordMeta::default(), "password2")?;
+        pt.add_password("pass3", "test3", PasswordMeta::default(), "password3")?;
 
         let encoded = pt.encoded();
         println!("{:?}", encoded);
