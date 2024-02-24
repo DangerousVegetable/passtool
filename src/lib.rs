@@ -13,6 +13,8 @@ use aes_gcm_siv::{
 
 use serde::{Serialize, Deserialize};
 
+pub mod generator;
+
 pub use Error::*;
 #[derive(Debug, PartialEq)]
 pub enum Error {
