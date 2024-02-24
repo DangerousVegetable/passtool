@@ -3,20 +3,25 @@ use native_windows_derive as nwd;
 
 use nwd::NwgUi;
 use nwg::{NativeUi, WindowFlags};
+use passtool::PassTable;
 
-use std::{cell::RefCell, thread, time::Duration};
+use std::{cell::RefCell, thread, time::Duration, path::Path};
 use winapi::um::winuser::{GetAsyncKeyState, VK_CONTROL, VK_MENU};
 //const flaggg: WindowFlags = WindowFlags::POPUP;
 
+pub const SAVEFILE: &str = "passwords.pt";
+
 #[derive(Default, NwgUi)]
 pub struct PassToolApp {
+    
+    passtable: PassTable,
+
     #[nwg_resource(source_file: Some("./resources/icon.ico"))]
     icon: nwg::Icon, // icon
 
     #[nwg_control(flags:"SYS_MENU", icon: Some(&data.icon))]
     #[nwg_events( OnWindowClose: [PassToolApp::exit], OnInit: [PassToolApp::load_data])]
     window: nwg::Window, // hidden window
-
 
     #[nwg_control(parent: Some(&data.window), size: (500, 250), title: "PassTool Overlay", topmost: true, center: true, flags:"POPUP", icon: Some(&data.icon))]
     popup_window: nwg::Window, // main popup window
@@ -70,6 +75,15 @@ impl PassToolApp {
         unsafe{
             let hWnd = self.popup_window.handle.hwnd().unwrap();
             if IsWindowVisible(hWnd) == 0 {
+                let (mut x, mut y) = nwg::GlobalCursor::position();
+                let (w, h) = self.popup_window.size();
+                let (w, h) = (w as i32, h as i32);
+                let [total_width, total_height] = [nwg::Monitor::width(), nwg::Monitor::height()];
+                
+                x = std::cmp::min(total_width-w, x);
+                y = std::cmp::min(total_height-h-50, y);
+
+                self.popup_window.set_position(x, y);
                 ShowWindow(hWnd, SW_SHOW); // show the window for the new style to come into effect
             }
             else { 
@@ -140,19 +154,66 @@ impl PassToolApp {
         dv.insert_column("Description");
         dv.insert_column("Affiliated apps");
         dv.set_headers_enabled(true);
+        let mut names: Vec<&String> = self.passtable.get_names().collect();
+        names.sort();
+        self.update_list(&names);
+    }
+
+    fn update_list(&self, names: &[&String]) {
+        let dv = &self.data_view;
+        for name in names {
+            let meta = self.passtable.get_metadata(name).unwrap();
+            let ind: i32 = dv.len() as i32;
+            dv.insert_item(nwg::InsertListViewItem {
+                index: Some(ind),
+                column_index: 0,
+                text: Some(name.to_string()),
+                image: None,
+            });
+            dv.insert_item(nwg::InsertListViewItem {
+                index: Some(ind),
+                column_index: 1,
+                text: Some(meta.description.clone()),
+                image: None,
+            });
+            dv.insert_item(nwg::InsertListViewItem {
+                index: Some(ind),
+                column_index: 2,
+                text: Some(format!("{:?}", meta.apps)),
+                image: None,
+            });
+        }
+    }
+
+    fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut path = std::env::current_exe().unwrap();
+        path.pop();
+        path.push(SAVEFILE);
+        self.passtable.to_file(&path)
     }
 
     fn exit(&self) {
+        let _ = self.save();
         nwg::stop_thread_dispatch();
     }
 
 }
 
 pub fn run() {
+    let pt = PassTable::default();
+    
+    let mut path = std::env::current_exe().unwrap();
+    path.pop();
+    path.push(SAVEFILE);
+    
+    if !path.exists() {
+        pt.to_file(&path).unwrap();
+    }
+    let pt = PassTable::from_file(&path).unwrap();
+    
     nwg::init().expect("Failed to init Native Windows GUI");
     nwg::Font::set_global_family("Segoe UI").expect("Failed to set default font");
-
-    let _app = PassToolApp::build_ui(Default::default()).expect("Failed to build UI");
+    let _app = PassToolApp::build_ui(PassToolApp{passtable: pt, ..Default::default()}).expect("Failed to build UI");
 
     nwg::dispatch_thread_events();
 }

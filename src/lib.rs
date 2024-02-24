@@ -1,6 +1,5 @@
 use core::fmt;
-use std::fs;
-use std::collections::HashMap;
+use std::{fs, collections::{HashMap, hash_map::Keys}, path::Path};
 
 use hex_literal::hex;
 
@@ -8,7 +7,7 @@ use sha2::{Sha256, Sha512, Digest};
 use sha2::digest::typenum::Unsigned;
 
 use aes_gcm_siv::{
-    aead::{Aead, KeyInit, Key},
+    aead::{Aead, KeyInit, Key, OsRng},
     Aes256GcmSiv, Nonce
 };
 
@@ -98,7 +97,7 @@ impl Password {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Default)]
 pub struct PassTable {
     passwords: HashMap<String, Password>
 }
@@ -117,12 +116,12 @@ impl PassTable {
         Ok(table)
     }
 
-    pub fn from_file(filename: &str) -> Result<Self, Box<dyn std::error::Error>>  {
+    pub fn from_file<P:  AsRef<Path>>(filename: P) -> Result<Self, Box<dyn std::error::Error>>  {
         let encoded = fs::read(filename)?;
         PassTable::from_binary(&encoded)
     }
 
-    pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>>{
+    pub fn to_file<P : AsRef<Path>>(&self, filename: P) -> Result<(), Box<dyn std::error::Error>>{
         let encoded = self.encoded();
         fs::write(filename, encoded)?;
         Ok(())
@@ -167,6 +166,10 @@ impl PassTable {
 
     pub fn remove_password(&mut self, name: &str) -> Result<(), Error> {
         self.remove_cypher(name)
+    }
+
+    pub fn get_names(&self) -> Keys<'_, String, Password>{
+        self.passwords.keys()
     }
 }
 
