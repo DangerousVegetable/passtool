@@ -90,6 +90,10 @@ pub struct Password {
 }
 
 impl Password {
+    pub fn new(cypher: Vec<u8>, meta: PasswordMeta) -> Self{
+        Password{cypher, meta}
+    }
+
     pub fn from_cypher(cypher: Vec<u8>) -> Self{
         Password{cypher, meta: Default::default()}
     }

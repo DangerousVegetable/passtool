@@ -3,7 +3,7 @@ use native_windows_derive as nwd;
 
 use nwd::NwgUi;
 use nwg::{NativeUi, WindowFlags};
-use passtool::{generator, PassTable};
+use passtool::{generator, PassTable, Password, PasswordMeta};
 
 use std::{cell::RefCell, thread, time::Duration, path::Path};
 use winapi::{shared::{minwindef::{HMODULE, MAX_PATH}, ntdef::{LPCWSTR, WCHAR}, windef::POINT}, um::{uxtheme::SetWindowTheme, winnt::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ}, winuser::{GetAsyncKeyState, VK_CONTROL, VK_MENU}}};
@@ -13,7 +13,7 @@ pub const SAVEFILE: &str = "passwords.pt";
 
 #[derive(Default, NwgUi)]
 pub struct PassToolApp {
-    passtable: PassTable,
+    passtable: RefCell<PassTable>,
 
     #[nwg_resource(source_file: Some("./resources/icon.ico"))]
     icon: nwg::Icon, // icon
@@ -22,13 +22,12 @@ pub struct PassToolApp {
     #[nwg_events( OnWindowClose: [PassToolApp::exit], OnInit: [PassToolApp::load_data])]
     window: nwg::Window, // hidden window
 
-    #[nwg_control(parent: Some(&data.window), size: (500, 300), title: "PassTool Overlay", topmost: true, center: true, flags: "POPUP", icon: Some(&data.icon))]
+    #[nwg_control(parent: Some(&data.window), size: (500, 350), title: "PassTool Overlay", topmost: true, center: true, flags: "WINDOW|POPUP", icon: Some(&data.icon))]
     popup_window: nwg::Window, // main popup window
 
-    #[nwg_control(spacing: 10)]
+    #[nwg_control(spacing: 15)]
     #[nwg_layout(parent: popup_window)]
     layout: nwg::GridLayout, // layout
-
 
     #[nwg_control(text: "App-specific passwords:", flags: "VISIBLE")]
     #[nwg_layout_item(layout: layout, row: 0, col_span: 4)]
@@ -42,6 +41,7 @@ pub struct PassToolApp {
     #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input], OnListViewItemChanged: [PassToolApp::disable_input])]
     rec_pass_view: nwg::ListView, // list of passwords
     rec_pass_names: RefCell<Vec<String>>,
+    active_process: RefCell<String>,
     
     #[nwg_control(text: "All passwords:", flags: "VISIBLE")]
     #[nwg_layout_item(layout: layout, row: 4, col_span: 4)]
@@ -60,6 +60,51 @@ pub struct PassToolApp {
     #[nwg_layout_item(layout: layout, col_span: 4, row: 12)]
     input_box: nwg::TextInput, // input 
     input_text: RefCell<String>, // shared string
+
+    #[nwg_control(parent: popup_window, text: "Add")]
+    #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 2)]
+    #[nwg_events(OnButtonClick: [PassToolApp::show_add_password])]
+    new_button: nwg::Button,
+
+    #[nwg_control(parent: Some(&data.popup_window), title: "Add password", size: (300, 250), flags: "WINDOW|DISABLED")]
+    add_password_window: nwg::Window, // window for adding password
+    #[nwg_control(spacing: 5)]
+    #[nwg_layout(parent: popup_window)]
+    add_layout: nwg::GridLayout, // layout
+    #[nwg_control(parent: add_password_window, text: "Name:")]
+    #[nwg_layout_item(layout: add_layout, col: 0, row: 0)]
+    password_name_label: nwg::Label,
+    #[nwg_control(parent: add_password_window, text: "", placeholder_text: Some("anything"), flags: "VISIBLE")]
+    #[nwg_layout_item(layout: add_layout, col: 1, row: 0, col_span: 2)]
+    password_name_input: nwg::TextInput,
+    #[nwg_control(parent: add_password_window, text: "Password:")]
+    #[nwg_layout_item(layout: add_layout, col: 0, row: 1)]
+    password_label: nwg::Label,
+    #[nwg_control(parent: add_password_window, text: "", placeholder_text: Some("password"), password: Some('*'), flags: "VISIBLE")]
+    #[nwg_layout_item(layout: add_layout, col: 1, row: 1, col_span: 2)]
+    password_input: nwg::TextInput,
+    #[nwg_control(parent: add_password_window, text: "Key:")]
+    #[nwg_layout_item(layout: add_layout, col: 0, row: 2)]
+    password_key_label: nwg::Label,
+    #[nwg_control(parent: add_password_window, text: "", placeholder_text: Some("key"), password: Some('*'), flags: "VISIBLE")]
+    #[nwg_layout_item(layout: add_layout, col: 1, row: 2, col_span: 2)]
+    password_key_input: nwg::TextInput,
+    #[nwg_control(parent: add_password_window, text: "Repeat key:")]
+    #[nwg_layout_item(layout: add_layout, col: 0, row: 3)]
+    password_repeat_key_label: nwg::Label,
+    #[nwg_control(parent: add_password_window, text: "", placeholder_text: Some("key again"), password: Some('*'), flags: "VISIBLE")]
+    #[nwg_layout_item(layout: add_layout, col: 1, row: 3, col_span: 2)]
+    password_repeat_key_input: nwg::TextInput,
+    #[nwg_control(parent: add_password_window, text: "Description (optional):")]
+    #[nwg_layout_item(layout: add_layout, col: 0, row: 4)]
+    password_description_label: nwg::Label,
+    #[nwg_control(parent: add_password_window, text: "", placeholder_text: Some("anything"), flags: "VISIBLE")]
+    #[nwg_layout_item(layout: add_layout, col: 1, row: 4, col_span: 2)]
+    password_description_input: nwg::TextInput,
+    #[nwg_control(parent: add_password_window, text: "Add")]
+    #[nwg_layout_item(layout: add_layout, col: 0, row: 5, col_span: 3)]
+    #[nwg_events(OnButtonClick: [PassToolApp::add_password])]
+    password_add_button: nwg::Button,
 
     #[nwg_control(icon: Some(&data.icon), tip: Some("PassTool"))]
     #[nwg_events(MousePressLeftUp: [PassToolApp::toggle_overlay], MousePressRightUp: [PassToolApp::show_tray_menu])]
@@ -82,6 +127,49 @@ pub struct PassToolApp {
 }
 
 impl PassToolApp {
+    fn add_password(&self) {
+        if self.password_key_input.text() != self.password_repeat_key_input.text(){
+            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Keys do not match!", );
+            return;
+        }
+        let name = self.password_name_input.text();
+        if name.len() == 0 {
+            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty name is not allowed!");
+            return;
+        }
+        let key = self.password_key_input.text();
+        if key.len() == 0 {
+            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty key is not allowed!");
+            return;
+        }
+        let password = self.password_input.text();
+        if password.len() == 0 {
+            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty password is not allowed!");
+            return;
+        }
+        let description = self.password_description_input.text();
+        let _ = self.passtable.borrow_mut().add_password(&name, &password, PasswordMeta::new(description, Default::default()), &key);
+        let _ = self.save();
+        self.clear_add_password();
+        self.add_password_window.set_visible(false);
+        self.update_list();
+    }
+
+    fn clear_add_password(&self) {
+        self.password_name_input.set_text("");
+        self.password_key_input.set_text("");
+        self.password_repeat_key_input.set_text("");
+        self.password_input.set_text("");
+        self.password_input.set_text("");
+    }
+
+    fn show_add_password(&self) {
+        let (x, y) = nwg::GlobalCursor::position();
+        self.add_password_window.set_position(x, y);
+        self.add_password_window.set_enabled(true);
+        self.add_password_window.set_visible(true);
+    }
+
     fn show_tray_menu(&self) {
         let (x, y) = nwg::GlobalCursor::position();
         self.tray_menu.popup(x, y);
@@ -90,18 +178,16 @@ impl PassToolApp {
     fn toggle_overlay(&self) {
         use winapi::um::{psapi::GetModuleFileNameExW, processthreadsapi::OpenProcess, winuser::{ShowWindow, IsWindowVisible, SW_HIDE, SW_SHOW, WindowFromPoint, GetWindowThreadProcessId}};
         unsafe{
-            let (mut x, mut y) = nwg::GlobalCursor::position(); //cursor position
-            let mut process_name = [0 as WCHAR; MAX_PATH]; //process name
-            let active_hwnd = WindowFromPoint(POINT{x,y}); //hndw of the window below the cursor
-            let mut process_id: u32 = 0; //process id of the window below the cursor
-            GetWindowThreadProcessId(active_hwnd, &mut process_id);
-            let hprocess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id); //process handle of the window below the cursos
-            GetModuleFileNameExW(hprocess, 0 as HMODULE, process_name.as_mut_ptr(), MAX_PATH as u32);
-            let active: String = process_name.iter().map(|x| {char::from_u32(*x as u32).unwrap()}).collect();
-            //println!("{:?}-{process_id}-{:?}-{active}", hprocess, active_hwnd);
-            
-            let hwnd = self.popup_window.handle.hwnd().unwrap();
-            if IsWindowVisible(hwnd) == 0 {                
+            if !self.popup_window.visible() {                
+                let (mut x, mut y) = nwg::GlobalCursor::position(); //cursor position
+                let mut process_name = [0 as WCHAR; MAX_PATH]; //process name
+                let active_hwnd = WindowFromPoint(POINT{x,y}); //hndw of the window below the cursor
+                let mut process_id: u32 = 0; //process id of the window below the cursor
+                GetWindowThreadProcessId(active_hwnd, &mut process_id);
+                let hprocess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id); //process handle of the window below the cursos
+                GetModuleFileNameExW(hprocess, 0 as HMODULE, process_name.as_mut_ptr(), MAX_PATH as u32);
+                *self.active_process.borrow_mut() = process_name.iter().map(|x| {char::from_u32(*x as u32).unwrap()}).collect(); //setting active_process to the name of the underlying window process
+                
                 let (w, h) = self.popup_window.size();
                 let (w, h) = (w as i32, h as i32);
                 let [total_width, total_height] = [nwg::Monitor::width(), nwg::Monitor::height()];
@@ -110,10 +196,13 @@ impl PassToolApp {
                 y = std::cmp::min(total_height-h-50, y);
 
                 self.popup_window.set_position(x, y);
-                ShowWindow(hwnd, SW_SHOW); // show the window for the new style to come into effect
+                self.update_list();
+                self.popup_window.set_enabled(true);
+                self.popup_window.set_visible(true);
             }
             else { 
-                ShowWindow(hwnd, SW_HIDE); 
+                self.add_password_window.set_visible(false);
+                self.popup_window.set_visible(false); 
             }
         }
     }
@@ -132,6 +221,7 @@ impl PassToolApp {
         *self.input_text.borrow_mut() = format!("Input key for the password \"{pass_name}\":");
         self.input_box.set_placeholder_text(Some(self.input_text.borrow_mut().as_str()));
         self.input_box.set_visible(true);
+        self.input_box.set_focus();
     }
 
     fn tray_notification(&self) {
@@ -182,17 +272,24 @@ impl PassToolApp {
         dv.insert_column("Description");
         dv.insert_column("Affiliated apps");
         dv.set_headers_enabled(true);
-        let mut names: Vec<&String> = self.passtable.get_names().collect();
-        names.sort();
-        self.update_list(&names);
+        self.update_list();
     }
 
-    fn update_list(&self, names: &[&String]) {
+    fn update_list(&self) {
+        let pt = self.passtable.borrow();
+        let mut names: Vec<&String> = pt.get_names().collect();
+        names.sort();
+        self.update_list_with_names(&names);
+    }
+
+    fn update_list_with_names(&self, names: &[&String]) {
         *self.pass_names.borrow_mut() = names.iter().map(|x| {(*x).clone()}).collect(); 
 
         let dv = &self.pass_view;
+        dv.clear();
+        let pt = self.passtable.borrow();
         for name in &(*self.pass_names.borrow()) {
-            let meta = self.passtable.get_metadata(name).unwrap();
+            let meta = pt.get_metadata(name).unwrap();
             let ind: i32 = dv.len() as i32;
             dv.insert_item(nwg::InsertListViewItem {
                 index: Some(ind),
@@ -219,7 +316,7 @@ impl PassToolApp {
         let mut path = std::env::current_exe().unwrap();
         path.pop();
         path.push(SAVEFILE);
-        self.passtable.to_file(&path)
+        self.passtable.borrow().to_file(&path)
     }
 
     fn exit(&self) {
@@ -243,7 +340,7 @@ pub fn run() {
     
     nwg::init().expect("Failed to init Native Windows GUI");
     nwg::Font::set_global_family("Segoe UI").expect("Failed to set default font");
-    let _app = PassToolApp::build_ui(PassToolApp{passtable: pt, ..Default::default()}).expect("Failed to build UI");
+    let _app = PassToolApp::build_ui(PassToolApp{passtable: RefCell::new(pt), ..Default::default()}).expect("Failed to build UI");
 
     nwg::dispatch_thread_events();
 }
