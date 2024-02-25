@@ -23,6 +23,7 @@ pub struct PassToolApp {
     window: nwg::Window, // hidden window
 
     #[nwg_control(parent: Some(&data.window), size: (500, 350), title: "PassTool Overlay", topmost: true, center: true, flags: "WINDOW|POPUP", icon: Some(&data.icon))]
+    #[nwg_events(OnKeyEnter: [PassToolApp::get_password], OnKeyEsc: [PassToolApp::toggle_overlay])]
     popup_window: nwg::Window, // main popup window
 
     #[nwg_control(spacing: 15)]
@@ -38,8 +39,8 @@ pub struct PassToolApp {
         background_color: [100,100,100]
     )]
     #[nwg_layout_item(layout: layout, col_span: 4, row: 1, row_span: 3)]
-    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input], OnListViewItemChanged: [PassToolApp::disable_input])]
-    rec_pass_view: nwg::ListView, // list of passwords
+    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::update_selected_password(SELF, CTRL), PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::show_edit_menu])]
+    rec_pass_view: nwg::ListView, // list of app-specific passwords
     rec_pass_names: RefCell<Vec<String>>,
     active_process: RefCell<String>,
     
@@ -51,22 +52,24 @@ pub struct PassToolApp {
         background_color: [100,100,100]
         )]
     #[nwg_layout_item(layout: layout, col_span: 4, row: 5, row_span: 7)]
-    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input], OnListViewItemChanged: [PassToolApp::disable_input])]
+    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::update_selected_password(SELF, CTRL), PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::show_edit_menu])]
     pass_view: nwg::ListView, // list of passwords
     pass_names: RefCell<Vec<String>>,
 
     #[nwg_control(parent: popup_window, text: "", placeholder_text: Some("Choose password"), password: Some('*'), flags: "VISIBLE")]
-    #[nwg_events(OnKeyEnter: [])]
     #[nwg_layout_item(layout: layout, col_span: 4, row: 12)]
-    input_box: nwg::TextInput, // input 
-    input_text: RefCell<String>, // shared string
+    key_input: nwg::TextInput, // input 
+    key_label: RefCell<String>, // shared string
+
+    selected_password: RefCell<Option<String>>,
 
     #[nwg_control(parent: popup_window, text: "Add")]
-    #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 2)]
+    #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 3)]
     #[nwg_events(OnButtonClick: [PassToolApp::show_add_password])]
     new_button: nwg::Button,
 
-    #[nwg_control(parent: Some(&data.popup_window), title: "Add password", size: (300, 250), flags: "WINDOW|DISABLED")]
+    #[nwg_control(parent: Some(&data.popup_window), title: "Add/Edit password", size: (300, 250), flags: "WINDOW|DISABLED")]
+    #[nwg_events(OnWindowClose: [PassToolApp::clear_add_password])]
     add_password_window: nwg::Window, // window for adding password
     #[nwg_control(spacing: 5)]
     #[nwg_layout(parent: popup_window)]
@@ -110,6 +113,17 @@ pub struct PassToolApp {
     #[nwg_events(MousePressLeftUp: [PassToolApp::toggle_overlay], MousePressRightUp: [PassToolApp::show_tray_menu])]
     tray: nwg::TrayNotification, // tray notification
 
+    #[nwg_control(parent: popup_window, popup: true)]
+    edit_menu: nwg::Menu, // tray menu
+    
+    #[nwg_control(parent: edit_menu, text: "Edit")]
+    #[nwg_events(OnMenuItemSelected: [PassToolApp::edit_password])]
+    edit_item1: nwg::MenuItem, // tray menu option
+
+    #[nwg_control(parent: edit_menu, text: "Delete")]
+    #[nwg_events(OnMenuItemSelected: [PassToolApp::remove_password])]
+    edit_item2: nwg::MenuItem, // tray menu option
+
     #[nwg_control(parent: window, popup: true)]
     tray_menu: nwg::Menu, // tray menu
 
@@ -127,28 +141,134 @@ pub struct PassToolApp {
 }
 
 impl PassToolApp {
+    fn remove_password(&self) {
+        let name = self.selected_password.borrow();
+        if name.is_none() {return}
+
+        let name = name.as_ref().unwrap();
+        let confirm_password_delete = nwg::MessageParams {
+            title: "Delete password",
+            content: &format!("Are you sure you want to delete the password \'{name}\'?"),
+            buttons: nwg::MessageButtons::YesNo,
+            icons: nwg::MessageIcons::Warning
+        };
+        if let nwg::MessageChoice::Yes = nwg::modal_message(self.popup_window.handle, &confirm_password_delete)
+        {
+            let _ = self.passtable.borrow_mut().remove_password(name);
+        }
+
+        let _ = self.save();
+        self.update_list();
+    }
+
+    fn get_password(&self) {
+        let name = self.selected_password.borrow();
+        if name.is_none() {return}
+
+        let name = name.as_ref().unwrap();
+        let key = self.key_input.text();
+        if key.len() == 0{
+            self.key_input.set_enabled(true);
+            self.key_input.set_focus();
+            return;
+        }
+        self.key_input.set_text("");
+        match self.passtable.borrow().get_password(name, &key) {
+            Ok(password) => {
+                nwg::Clipboard::set_data_text(self.popup_window.handle, &password);
+                nwg::modal_info_message(self.popup_window.handle, "Success!","Password saved into clipboard!");
+                self.disable_input();
+            }
+            Err(passtool::IncorrectPass) => {
+                nwg::modal_error_message(self.popup_window.handle, "Warning!", "Incorrect password!");
+                self.key_input.set_focus();
+            },
+            Err(e) => {nwg::modal_error_message(self.popup_window.handle, "Unknown error!", &format!("{e}"));}
+        }
+    }
+    
+    fn show_edit_menu(&self) {
+        let name = self.selected_password.borrow();
+        if name.is_none() {return}
+        
+        let (x, y) = nwg::GlobalCursor::position();
+        self.edit_menu.popup(x, y);
+    }
+
+    fn edit_password(&self) {
+        let name = self.selected_password.borrow();
+        if name.is_none() {return}
+        
+        {
+            let pt = self.passtable.borrow();
+            let name = name.as_ref().unwrap();
+            let meta = pt.get_metadata(name).unwrap();
+            
+            self.password_name_input.set_text(name);
+            self.password_description_input.set_text(&meta.description);
+        }
+    
+        self.show_add_password();
+    }
+
     fn add_password(&self) {
-        if self.password_key_input.text() != self.password_repeat_key_input.text(){
-            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Keys do not match!", );
-            return;
-        }
         let name = self.password_name_input.text();
-        if name.len() == 0 {
-            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty name is not allowed!");
-            return;
-        }
-        let key = self.password_key_input.text();
-        if key.len() == 0 {
-            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty key is not allowed!");
-            return;
-        }
         let password = self.password_input.text();
-        if password.len() == 0 {
-            nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty password is not allowed!");
-            return;
-        }
+        let key = self.password_key_input.text();
+        let rep_key = self.password_repeat_key_input.text();
         let description = self.password_description_input.text();
-        let _ = self.passtable.borrow_mut().add_password(&name, &password, PasswordMeta::new(description, Default::default()), &key);
+
+        let confirm_password_edit = nwg::MessageParams {
+            title: "Edit password",
+            content: &format!("Password with this name already exists. Are you sure you want to edit the password \'{name}\'?"),
+            buttons: nwg::MessageButtons::YesNo,
+            icons: nwg::MessageIcons::Warning
+        };
+        
+        { // additional scope for pt
+            let mut pt = self.passtable.borrow_mut();
+            if name.len() == 0 {
+                nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty name is not allowed!");
+                return;
+            }
+            if password.len() == 0 {
+                if !pt.contains(&name) {
+                    nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty password is not allowed!");
+                    return;
+                }
+                else{
+                    if key.len() != 0 || rep_key.len() != 0 {
+                        nwg::modal_error_message(self.add_password_window.handle, "Warning!", "It's impossible to update password without specifying the key and vice versa!");
+                        return;
+                    }
+    
+                    if let nwg::MessageChoice::Yes = nwg::modal_message(self.popup_window.handle, &confirm_password_edit)
+                    {
+                        let old_apps = pt.get_metadata(&name).unwrap().apps.clone();
+                        let _ = pt.update_metadata(&name, PasswordMeta::new(description, old_apps));
+                    }
+                    else {return}
+                }
+            }
+            else{
+                if key.len() == 0 {
+                    nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Empty key is not allowed!");
+                    return;
+                }
+                if key != rep_key{
+                    nwg::modal_error_message(self.add_password_window.handle, "Warning!", "Keys do not match!", );
+                    return;
+                }
+                if pt.contains(&name){
+                    if let nwg::MessageChoice::Yes = nwg::modal_message(self.popup_window.handle, &confirm_password_edit) {
+                        let _ = pt.remove_password(&name);
+                    }
+                    else {return}
+                }
+                let _ = pt.add_password(&name, &password, PasswordMeta::new(description, Default::default()), &key);
+            }
+        }
+
         let _ = self.save();
         self.clear_add_password();
         self.add_password_window.set_visible(false);
@@ -157,10 +277,10 @@ impl PassToolApp {
 
     fn clear_add_password(&self) {
         self.password_name_input.set_text("");
+        self.password_input.set_text("");
         self.password_key_input.set_text("");
         self.password_repeat_key_input.set_text("");
-        self.password_input.set_text("");
-        self.password_input.set_text("");
+        self.password_description_input.set_text("");
     }
 
     fn show_add_password(&self) {
@@ -192,13 +312,15 @@ impl PassToolApp {
                 let (w, h) = (w as i32, h as i32);
                 let [total_width, total_height] = [nwg::Monitor::width(), nwg::Monitor::height()];
                 
-                x = std::cmp::min(total_width-w, x);
-                y = std::cmp::min(total_height-h-50, y);
+                x = std::cmp::min(total_width-w, x-w/2);
+                y = std::cmp::min(total_height-h-50, y-h/2);
 
                 self.popup_window.set_position(x, y);
                 self.update_list();
                 self.popup_window.set_enabled(true);
                 self.popup_window.set_visible(true);
+
+                self.pass_view.set_focus();
             }
             else { 
                 self.add_password_window.set_visible(false);
@@ -207,21 +329,35 @@ impl PassToolApp {
         }
     }
 
-    fn disable_input(&self) {
-        self.input_box.set_text("");
-        self.input_box.set_placeholder_text(Some("Choose password"));
-        self.input_box.set_enabled(false);
-        self.input_box.set_visible(true);
+    fn update_selected_password(&self, view: &nwg::ListView) {
+        let ind = view.selected_item();
+        if ind.is_none() {
+            *self.selected_password.borrow_mut() = None;
+            return
+        }
+        let ind = ind.unwrap();
+        let pass_names = if view.handle == self.pass_view.handle {self.pass_names.borrow()} else {self.rec_pass_names.borrow()};
+        let pass_name = pass_names[ind].clone();
+        *self.selected_password.borrow_mut() = Some(pass_name);
     }
 
-    fn enable_input(&self) {
-        let ind = self.pass_view.selected_item().unwrap();
-        let pass_name = &self.pass_names.borrow()[ind];
-        self.input_box.set_enabled(true);
-        *self.input_text.borrow_mut() = format!("Input key for the password \"{pass_name}\":");
-        self.input_box.set_placeholder_text(Some(self.input_text.borrow_mut().as_str()));
-        self.input_box.set_visible(true);
-        self.input_box.set_focus();
+    fn disable_input(&self) {
+        self.key_input.set_text("");
+        self.key_input.set_placeholder_text(Some("Choose password"));
+        self.key_input.set_enabled(false);
+        self.key_input.set_visible(true);
+    }
+
+    fn enable_input(&self, view: &nwg::ListView) {
+        self.update_selected_password(view);
+        let selected_password = self.selected_password.borrow();
+        let pass_name = (*selected_password).as_ref().unwrap();
+        *self.key_label.borrow_mut() = format!("Input key for the password \"{pass_name}\":");
+
+        self.key_input.set_enabled(true);
+        self.key_input.set_placeholder_text(Some(self.key_label.borrow_mut().as_str()));
+        self.key_input.set_visible(true);
+        self.key_input.set_focus();
     }
 
     fn tray_notification(&self) {
@@ -250,8 +386,8 @@ impl PassToolApp {
 
     fn load_data(&self) {
         use winapi::um::winuser::{SetWindowLongPtrA, GWL_STYLE, GetWindowLongA, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, ShowWindow, SW_HIDE, SW_SHOW};
-        self.input_box.set_visible(true);
-        self.input_box.set_enabled(false);
+        self.key_input.set_visible(true);
+        self.key_input.set_enabled(false);
         unsafe{
             let hwnd = self.popup_window.handle.hwnd().unwrap();
             let theme : Vec<u16> = "Explorer".as_bytes().iter().map(|x| {*x as u16}).collect();
@@ -276,18 +412,17 @@ impl PassToolApp {
     }
 
     fn update_list(&self) {
+        self.update_all_passwords();
+    }
+
+    fn update_all_passwords(&self) {
         let pt = self.passtable.borrow();
         let mut names: Vec<&String> = pt.get_names().collect();
         names.sort();
-        self.update_list_with_names(&names);
-    }
-
-    fn update_list_with_names(&self, names: &[&String]) {
         *self.pass_names.borrow_mut() = names.iter().map(|x| {(*x).clone()}).collect(); 
 
         let dv = &self.pass_view;
         dv.clear();
-        let pt = self.passtable.borrow();
         for name in &(*self.pass_names.borrow()) {
             let meta = pt.get_metadata(name).unwrap();
             let ind: i32 = dv.len() as i32;

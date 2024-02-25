@@ -177,6 +177,10 @@ impl PassTable {
     pub fn get_names(&self) -> Keys<'_, String, Password>{
         self.passwords.keys()
     }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.passwords.contains_key(name)
+    }
 }
 
 #[cfg(test)]
