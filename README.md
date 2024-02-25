@@ -8,3 +8,6 @@ PassTool only uses native Win32 API.
 - password editor
 - overlay
 - password suggestion based on a foreground window
+# Screenshots:
+![image](https://github.com/DangerousVegetable/PassTool/assets/37582942/3981803a-634c-49f1-8f57-7b254b0590a7)
+
