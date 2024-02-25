@@ -34,36 +34,53 @@ pub struct PassToolApp {
     #[nwg_layout_item(layout: layout, row: 0, col_span: 4)]
     label1: nwg::Label,
     
-    #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Detailed, focus: true,
+    #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Detailed, focus: false,
         ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, 
         background_color: [100,100,100]
     )]
     #[nwg_layout_item(layout: layout, col_span: 4, row: 1, row_span: 3)]
-    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::update_selected_password(SELF, CTRL), PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::show_edit_menu])]
+    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::show_edit_menu])]
     rec_pass_view: nwg::ListView, // list of app-specific passwords
     rec_pass_names: RefCell<Vec<String>>,
-    active_process: RefCell<String>,
+
+    active_process: RefCell<String>, // process name below the popup window
     
     #[nwg_control(text: "All passwords:", flags: "VISIBLE")]
-    #[nwg_layout_item(layout: layout, row: 4, col_span: 4)]
+    #[nwg_layout_item(layout: layout, row: 4, col_span: 3)]
     label2: nwg::Label,
+    #[nwg_control(text: "Password's apps:", flags: "VISIBLE")]
+    #[nwg_layout_item(layout: layout, row: 4, col: 3, col_span: 2)]
+    label3: nwg::Label,
     #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Detailed, focus: true,
         ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, 
         background_color: [100,100,100]
-        )]
-    #[nwg_layout_item(layout: layout, col_span: 4, row: 5, row_span: 7)]
-    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::update_selected_password(SELF, CTRL), PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::show_edit_menu])]
+    )]
+    #[nwg_layout_item(layout: layout, col_span: 3, row: 5, row_span: 7)]
+    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::show_edit_menu])]
     pass_view: nwg::ListView, // list of passwords
     pass_names: RefCell<Vec<String>>,
+        
+    #[nwg_control(parent: popup_window, text: "Add app")]
+    #[nwg_layout_item(layout: layout, row: 5, col: 3, col_span: 2, row_span: 2)]
+    #[nwg_events(OnButtonClick: [])]
+    add_app_button: nwg::Button,
+    #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Simple, focus: false,
+        ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, 
+        background_color: [100,100,100]
+    )]
+    #[nwg_layout_item(layout: layout, col: 3, col_span: 2, row: 7, row_span: 6)]
+    #[nwg_events()]
+    app_view: nwg::ListView,
+    app_names: RefCell<Vec<String>>,
 
     #[nwg_control(parent: popup_window, text: "", placeholder_text: Some("Choose password"), password: Some('*'), flags: "VISIBLE")]
-    #[nwg_layout_item(layout: layout, col_span: 4, row: 12)]
+    #[nwg_layout_item(layout: layout, col_span: 3, row: 12, row_span: 1)]
     key_input: nwg::TextInput, // input 
     key_label: RefCell<String>, // shared string
 
     selected_password: RefCell<Option<String>>,
 
-    #[nwg_control(parent: popup_window, text: "Add")]
+    #[nwg_control(parent: popup_window, text: "New")]
     #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 3)]
     #[nwg_events(OnButtonClick: [PassToolApp::show_add_password])]
     new_button: nwg::Button,
@@ -158,7 +175,7 @@ impl PassToolApp {
         }
 
         let _ = self.save();
-        self.update_list();
+        self.update_lists();
     }
 
     fn get_password(&self) {
@@ -272,7 +289,7 @@ impl PassToolApp {
         let _ = self.save();
         self.clear_add_password();
         self.add_password_window.set_visible(false);
-        self.update_list();
+        self.update_lists();
     }
 
     fn clear_add_password(&self) {
@@ -306,8 +323,10 @@ impl PassToolApp {
                 GetWindowThreadProcessId(active_hwnd, &mut process_id);
                 let hprocess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id); //process handle of the window below the cursos
                 GetModuleFileNameExW(hprocess, 0 as HMODULE, process_name.as_mut_ptr(), MAX_PATH as u32);
-                *self.active_process.borrow_mut() = process_name.iter().map(|x| {char::from_u32(*x as u32).unwrap()}).collect(); //setting active_process to the name of the underlying window process
+                *self.active_process.borrow_mut() = process_name.iter().filter_map(|x| if *x != 0 { Some(char::from_u32(*x as u32).unwrap()) } else { None }).collect(); //setting active_process to the name of the underlying window process
                 
+                //dbg!(self.active_process.borrow());
+
                 let (w, h) = self.popup_window.size();
                 let (w, h) = (w as i32, h as i32);
                 let [total_width, total_height] = [nwg::Monitor::width(), nwg::Monitor::height()];
@@ -316,11 +335,12 @@ impl PassToolApp {
                 y = std::cmp::min(total_height-h-50, y-h/2);
 
                 self.popup_window.set_position(x, y);
-                self.update_list();
+                self.update_lists();
                 self.popup_window.set_enabled(true);
                 self.popup_window.set_visible(true);
 
-                self.pass_view.set_focus();
+                if self.rec_pass_names.borrow().len() != 0 { self.rec_pass_view.set_focus() } 
+                else { self.pass_view.set_focus(); }
             }
             else { 
                 self.add_password_window.set_visible(false);
@@ -402,17 +422,54 @@ impl PassToolApp {
         self.tray_notification();
         self.expect_shortcut();
         
-        let dv = &self.pass_view;
+        let pv = &self.pass_view;
+        pv.insert_column("Name");
+        pv.insert_column("Description");
+        pv.set_headers_enabled(true);
 
-        dv.insert_column("Name");
-        dv.insert_column("Description");
-        dv.insert_column("Affiliated apps");
-        dv.set_headers_enabled(true);
-        self.update_list();
+        let rpv = &self.rec_pass_view;
+        rpv.insert_column("Name");
+        rpv.insert_column("Description");
+        rpv.set_headers_enabled(true);
+
+        let av = &self.app_view;
+        av.insert_column("Path");
+        self.update_lists();
     }
 
-    fn update_list(&self) {
+    fn update_lists(&self) {
+        self.update_rec_passwords();
         self.update_all_passwords();
+    }
+
+    fn update_rec_passwords(&self) {
+        let app = &*self.active_process.borrow();
+        let pt = self.passtable.borrow();
+        let mut names: Vec<&String> = pt.get_names().collect();
+        names.sort();
+        *self.rec_pass_names.borrow_mut() = names.iter()
+                                                .map(|x| {(*x).clone()})
+                                                .filter(|x| {
+                                                    pt.get_metadata(x).unwrap().apps.contains(app)
+                                                }).collect();
+        let rv = &self.rec_pass_view;
+        rv.clear();
+        for name in &(*self.rec_pass_names.borrow()) {
+            let meta = pt.get_metadata(name).unwrap();
+            let ind: i32 = rv.len() as i32;
+            rv.insert_item(nwg::InsertListViewItem {
+                index: Some(ind),
+                column_index: 0,
+                text: Some(name.clone()),
+                image: None,
+            });
+            rv.insert_item(nwg::InsertListViewItem {
+                index: Some(ind),
+                column_index: 1,
+                text: Some(meta.description.clone()),
+                image: None,
+            }); 
+        }
     }
 
     fn update_all_passwords(&self) {
@@ -436,12 +493,6 @@ impl PassToolApp {
                 index: Some(ind),
                 column_index: 1,
                 text: Some(meta.description.clone()),
-                image: None,
-            });
-            dv.insert_item(nwg::InsertListViewItem {
-                index: Some(ind),
-                column_index: 2,
-                text: Some(format!("{:?}", meta.apps)),
                 image: None,
             });
         }

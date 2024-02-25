@@ -114,8 +114,8 @@ fn save_test() -> Result<(), Box<dyn std::error::Error>> {
 #[serial]
 fn save_and_load_test() -> Result<(), Box<dyn std::error::Error>> {
     let mut pt = PassTable::new();
-    pt.add_password("pass1", "test1", PasswordMeta::new("lmao1".to_string(), vec!["1".to_string(), "valorant".to_string(), "steam".to_string()]), "password1")?;
-    pt.add_password("pass2", "test2", PasswordMeta::default(), "password2")?;
+    pt.add_password("pass1", "test1", PasswordMeta::new("lmao1".to_string(), vec!["C:\\Users\\mukos\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe".to_string(), "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe".to_string()]), "password1")?;
+    pt.add_password("pass2", "test2", PasswordMeta::new("test".to_string(), vec!["C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe".to_string()]), "password2")?;
     pt.add_password("pass3", "test3", PasswordMeta::default(), "password3")?;
     pt.to_file("passwords.pt")?;
 
