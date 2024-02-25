@@ -15,7 +15,10 @@ pub const SAVEFILE: &str = "passwords.pt";
 pub struct PassToolApp {
     passtable: RefCell<PassTable>,
 
-    #[nwg_resource(source_file: Some("./resources/icon.ico"))]
+    #[nwg_resource]
+    embed: nwg::EmbedResource,
+
+    #[nwg_resource(source_embed: Some(&data.embed), source_embed_str: Some("MAINICON"))]
     icon: nwg::Icon, // icon
 
     #[nwg_control(flags:"SYS_MENU", icon: Some(&data.icon))]

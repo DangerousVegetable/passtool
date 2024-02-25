@@ -17,3 +17,6 @@ serde = {version = "1.0.196", features = ["derive"]}
 serial_test = "3.0.0"
 sha2 = "0.10.8"
 winapi = {version = "0.3.9", features = ["psapi", "uxtheme"]}
+
+[build-dependencies]
+embed-resource = "2.4"
