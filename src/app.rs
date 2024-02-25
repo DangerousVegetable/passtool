@@ -2,10 +2,10 @@ use native_windows_gui as nwg;
 use native_windows_derive as nwd;
 
 use nwd::NwgUi;
-use nwg::{NativeUi, WindowFlags};
+use nwg::{InsertListViewColumn, ListViewColumnFlags, NativeUi, WindowFlags};
 use passtool::{generator, PassTable, Password, PasswordMeta};
 
-use std::{cell::RefCell, thread, time::Duration, path::Path};
+use std::{cell::RefCell, ffi::OsStr, path::Path, thread, time::Duration};
 use winapi::{shared::{minwindef::{HMODULE, MAX_PATH}, ntdef::{LPCWSTR, WCHAR}, windef::POINT}, um::{uxtheme::SetWindowTheme, winnt::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ}, winuser::{GetAsyncKeyState, VK_CONTROL, VK_MENU}}};
 //const flaggg: WindowFlags = WindowFlags::POPUP;
 
@@ -38,50 +38,51 @@ pub struct PassToolApp {
         ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, 
         background_color: [100,100,100]
     )]
-    #[nwg_layout_item(layout: layout, col_span: 4, row: 1, row_span: 3)]
-    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::show_edit_menu])]
+    #[nwg_layout_item(layout: layout, col_span: 4, row: 1, row_span: 4)]
+    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::show_edit_menu],
+        OnListViewClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::update_app_list])]
     rec_pass_view: nwg::ListView, // list of app-specific passwords
     rec_pass_names: RefCell<Vec<String>>,
 
     active_process: RefCell<String>, // process name below the popup window
     
     #[nwg_control(text: "All passwords:", flags: "VISIBLE")]
-    #[nwg_layout_item(layout: layout, row: 4, col_span: 3)]
+    #[nwg_layout_item(layout: layout, row: 5, col_span: 3)]
     label2: nwg::Label,
     #[nwg_control(text: "Password's apps:", flags: "VISIBLE")]
-    #[nwg_layout_item(layout: layout, row: 4, col: 3, col_span: 2)]
+    #[nwg_layout_item(layout: layout, row: 5, col: 3, col_span: 2)]
     label3: nwg::Label,
     #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Detailed, focus: true,
         ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, 
         background_color: [100,100,100]
     )]
-    #[nwg_layout_item(layout: layout, col_span: 3, row: 5, row_span: 7)]
-    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::show_edit_menu])]
+    #[nwg_layout_item(layout: layout, col_span: 3, row: 6, row_span: 7)]
+    #[nwg_events(OnListViewItemActivated: [PassToolApp::enable_input(SELF, CTRL)], OnListViewItemChanged: [PassToolApp::disable_input], OnListViewRightClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::show_edit_menu],
+        OnListViewClick: [PassToolApp::update_selected_password(SELF,CTRL), PassToolApp::update_app_list])]
     pass_view: nwg::ListView, // list of passwords
     pass_names: RefCell<Vec<String>>,
         
     #[nwg_control(parent: popup_window, text: "Add app")]
-    #[nwg_layout_item(layout: layout, row: 5, col: 3, col_span: 2, row_span: 2)]
-    #[nwg_events(OnButtonClick: [])]
+    #[nwg_layout_item(layout: layout, row: 6, col: 3, col_span: 2, row_span: 2)]
+    #[nwg_events(OnButtonClick: [PassToolApp::add_app])]
     add_app_button: nwg::Button,
-    #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Simple, focus: false,
+    #[nwg_control(item_count: 10, list_style: nwg::ListViewStyle::Detailed, focus: false,
         ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, 
         background_color: [100,100,100]
     )]
-    #[nwg_layout_item(layout: layout, col: 3, col_span: 2, row: 7, row_span: 6)]
-    #[nwg_events()]
+    #[nwg_layout_item(layout: layout, col: 3, col_span: 2, row: 8, row_span: 6)]
+    #[nwg_events(OnListViewItemActivated:[PassToolApp::remove_app])]
     app_view: nwg::ListView,
     app_names: RefCell<Vec<String>>,
 
     #[nwg_control(parent: popup_window, text: "", placeholder_text: Some("Choose password"), password: Some('*'), flags: "VISIBLE")]
-    #[nwg_layout_item(layout: layout, col_span: 3, row: 12, row_span: 1)]
+    #[nwg_layout_item(layout: layout, col_span: 3, row: 13, row_span: 1)]
     key_input: nwg::TextInput, // input 
-    key_label: RefCell<String>, // shared string
 
     selected_password: RefCell<Option<String>>,
 
     #[nwg_control(parent: popup_window, text: "New")]
-    #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 3)]
+    #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 4)]
     #[nwg_events(OnButtonClick: [PassToolApp::show_add_password])]
     new_button: nwg::Button,
 
@@ -158,6 +159,42 @@ pub struct PassToolApp {
 }
 
 impl PassToolApp {
+    fn add_app(&self) {
+        let name = self.selected_password.borrow();
+        if name.is_none() {return}
+
+        let name = name.as_ref().unwrap();
+        let app = &*self.active_process.borrow();
+        {
+            let mut pt = self.passtable.borrow_mut();
+            let apps = &mut pt.get_metadata_mut(name).unwrap().apps;
+            if !apps.contains(app) { apps.push(app.clone()); }
+        }
+
+        let _ = self.save();
+        self.update_app_list();
+        self.update_rec_passwords();
+    }
+
+    fn remove_app(&self) {
+        let ind = self.app_view.selected_item();
+        if ind.is_none() { return; }
+        let name = self.selected_password.borrow();
+        if name.is_none() {return}
+
+        let ind = ind.unwrap(); //chosen index
+        let name = name.as_ref().unwrap(); //chosen password
+        {
+            let mut pt = self.passtable.borrow_mut();
+            let apps = &mut pt.get_metadata_mut(name).unwrap().apps;
+            apps.remove(ind);
+        }
+
+        let _ = self.save();
+        self.update_app_list();
+        self.update_rec_passwords();
+    }
+
     fn remove_password(&self) {
         let name = self.selected_password.borrow();
         if name.is_none() {return}
@@ -193,6 +230,7 @@ impl PassToolApp {
         match self.passtable.borrow().get_password(name, &key) {
             Ok(password) => {
                 nwg::Clipboard::set_data_text(self.popup_window.handle, &password);
+                //dbg!(&password);
                 nwg::modal_info_message(self.popup_window.handle, "Success!","Password saved into clipboard!");
                 self.disable_input();
             }
@@ -358,6 +396,7 @@ impl PassToolApp {
         let ind = ind.unwrap();
         let pass_names = if view.handle == self.pass_view.handle {self.pass_names.borrow()} else {self.rec_pass_names.borrow()};
         let pass_name = pass_names[ind].clone();
+        if self.key_input.enabled() {self.key_input.set_placeholder_text(Some(&format!("Input key for the password \"{}\":", &pass_name)));}
         *self.selected_password.borrow_mut() = Some(pass_name);
     }
 
@@ -369,13 +408,8 @@ impl PassToolApp {
     }
 
     fn enable_input(&self, view: &nwg::ListView) {
-        self.update_selected_password(view);
-        let selected_password = self.selected_password.borrow();
-        let pass_name = (*selected_password).as_ref().unwrap();
-        *self.key_label.borrow_mut() = format!("Input key for the password \"{pass_name}\":");
-
         self.key_input.set_enabled(true);
-        self.key_input.set_placeholder_text(Some(self.key_label.borrow_mut().as_str()));
+        self.update_selected_password(view);
         self.key_input.set_visible(true);
         self.key_input.set_focus();
     }
@@ -417,7 +451,6 @@ impl PassToolApp {
             style &= !(WS_EX_APPWINDOW);
             ShowWindow(hwnd, SW_HIDE); // hide the window
             SetWindowLongPtrA(hwnd, GWL_STYLE, style as isize); // set the style
-            
         }
         self.tray_notification();
         self.expect_shortcut();
@@ -431,15 +464,53 @@ impl PassToolApp {
         rpv.insert_column("Name");
         rpv.insert_column("Description");
         rpv.set_headers_enabled(true);
-
+        
         let av = &self.app_view;
-        av.insert_column("Path");
+        av.insert_column("App");
+        av.insert_column(InsertListViewColumn{
+            index: None,
+            fmt: None,
+            width: None,
+            text: Some("Full path".to_string())
+        });
+        av.set_headers_enabled(true);
+
         self.update_lists();
     }
 
     fn update_lists(&self) {
         self.update_rec_passwords();
         self.update_all_passwords();
+    }
+
+    fn update_app_list(&self) {
+        let av = &self.app_view;
+        av.clear();
+        let name = self.selected_password.borrow();
+        if name.is_none() {
+            return;
+        }
+        let name = name.as_ref().unwrap();
+        {
+            let pt = self.passtable.borrow();
+            *self.app_names.borrow_mut() = pt.get_metadata(name).unwrap().apps.clone();
+            for app in &*self.app_names.borrow() {
+                let path = Path::new(app);
+                let filename = path.file_name().unwrap_or(OsStr::new("_")).to_str().unwrap();
+                av.insert_item(nwg::InsertListViewItem {
+                    index: None,
+                    column_index: 0,
+                    text: Some(filename.to_string()),
+                    image: None,
+                });
+                av.insert_item(nwg::InsertListViewItem {
+                    index: Some(av.len() as i32 - 1),
+                    column_index: 1,
+                    text: Some(app.clone()),
+                    image: None,
+                });
+            }
+        }
     }
 
     fn update_rec_passwords(&self) {

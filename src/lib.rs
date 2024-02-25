@@ -137,6 +137,10 @@ impl PassTable {
         self.passwords.get(name)
     }
 
+    fn get_cypher_mut(&mut self, name: &str) -> Option<&mut Password> {
+        self.passwords.get_mut(name)
+    }
+
     fn remove_cypher(&mut self, name: &str) -> Result<(), Error> {
         self.passwords.remove(name).ok_or(Error::PassNotFound)?;
         Ok(())
@@ -162,6 +166,10 @@ impl PassTable {
     pub fn get_metadata(&self, name: &str) -> Result<&PasswordMeta, Error> {
         let p = self.get_cypher(name).ok_or(Error::PassNotFound)?;
         Ok(&p.meta)
+    }
+    pub fn get_metadata_mut(&mut self, name: &str) -> Result<&mut PasswordMeta, Error> {
+        let p = self.get_cypher_mut(name).ok_or(Error::PassNotFound)?;
+        Ok(&mut p.meta)
     }
 
     pub fn update_metadata(&mut self, name: &str, meta: PasswordMeta) -> Result<(), Error> {
