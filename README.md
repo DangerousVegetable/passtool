@@ -1,7 +1,7 @@
 # Passtool
 Open-source light utility for storing passwords. 
 # Is it safe?
-PassTool uses state-of-the-art **AES-GCM-SIV** encryption with **SHA512**.
+PassTool uses state-of-the-art **AES-GCM-SIV256** encryption in combination with **SHA256**.
 # What UI API does it use?
 PassTool only uses native Win32 API.
 # Features:
