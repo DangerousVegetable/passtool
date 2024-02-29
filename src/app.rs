@@ -2,7 +2,7 @@ use native_windows_gui as nwg;
 use native_windows_derive as nwd;
 
 use nwd::NwgUi;
-use nwg::{InsertListViewColumn, ListViewColumnFlags, NativeUi, WindowFlags};
+use nwg::{CheckBoxState, InsertListViewColumn, ListViewColumnFlags, NativeUi, WindowFlags};
 use passtool::{generator, PassTable, Password, PasswordMeta};
 
 use std::{cell::RefCell, ffi::OsStr, path::Path, thread, time::Duration};
@@ -88,7 +88,7 @@ pub struct PassToolApp {
     #[nwg_layout_item(layout: layout, row: 1, col: 4, col_span: 1, row_span: 4)]
     #[nwg_events(OnButtonClick: [PassToolApp::show_add_password])]
     new_button: nwg::Button,
-
+    
     #[nwg_control(parent: Some(&data.popup_window), title: "Add/Edit password", size: (300, 250), flags: "WINDOW|DISABLED")]
     #[nwg_events(OnWindowClose: [PassToolApp::clear_add_password])]
     add_password_window: nwg::Window, // window for adding password
@@ -103,6 +103,7 @@ pub struct PassToolApp {
     password_name_input: nwg::TextInput,
     #[nwg_control(parent: add_password_window, text: "Password:")]
     #[nwg_layout_item(layout: add_layout, col: 0, row: 1)]
+    #[nwg_events(OnLabelClick: [PassToolApp::show_generate_window], OnMouseMove: [PassToolApp::highlight_label])]
     password_label: nwg::Label,
     #[nwg_control(parent: add_password_window, text: "", placeholder_text: Some("password"), password: Some('*'), flags: "VISIBLE")]
     #[nwg_layout_item(layout: add_layout, col: 1, row: 1, col_span: 2)]
@@ -129,11 +130,35 @@ pub struct PassToolApp {
     #[nwg_layout_item(layout: add_layout, col: 0, row: 5, col_span: 3)]
     #[nwg_events(OnButtonClick: [PassToolApp::add_password])]
     password_add_button: nwg::Button,
-
+    
+    #[nwg_control(parent: Some(&data.add_password_window), title: "Generate password", size: (215,220), flags: "WINDOW|DISABLED")] // generate password window
+    generate_password_window: nwg::Window,
+    #[nwg_layout(parent: generate_password_window, max_column: Some(3))]
+    generate_layout: nwg::GridLayout, // generate window layout
+    #[nwg_control(parent: generate_password_window, text: "Generate")]
+    #[nwg_layout_item(layout: layout, col: 0, row: 0, col_span: 2, row_span: 2)]
+    #[nwg_events(OnButtonClick: [PassToolApp::generate_password])]
+    generate_button: nwg::Button,
+    #[nwg_control(parent: generate_password_window, text: "Length:")]
+    #[nwg_layout_item(layout: layout, col: 0, row: 2, col_span: 1, row_span: 2)]
+    length_label: nwg::Label,
+    #[nwg_control(parent: generate_password_window, flags: "VISIBLE|NUMBER", text: "16", align: HTextAlign::Right)]
+    #[nwg_layout_item(layout: layout, col: 1, row: 2, col_span: 1, row_span: 2)]
+    password_len: nwg::TextInput,
+    #[nwg_control(parent: generate_password_window, text: "Letters", check_state: CheckBoxState::Checked)]
+    #[nwg_layout_item(layout: layout, col: 0, row: 4, col_span: 1, row_span: 2)]
+    include_letters: nwg::CheckBox,
+    #[nwg_control(parent: generate_password_window, text: "Digits", check_state: CheckBoxState::Checked)]
+    #[nwg_layout_item(layout: layout, col: 1, row: 4, col_span: 1, row_span: 2)]
+    include_digits: nwg::CheckBox,
+    #[nwg_control(parent: generate_password_window, text: "Special", check_state: CheckBoxState::Checked)]
+    #[nwg_layout_item(layout: layout, col: 0, row: 6, col_span: 2, row_span: 2)]
+    include_special: nwg::CheckBox,
+    
     #[nwg_control(icon: Some(&data.icon), tip: Some("PassTool"))]
     #[nwg_events(MousePressLeftUp: [PassToolApp::toggle_overlay], MousePressRightUp: [PassToolApp::show_tray_menu])]
     tray: nwg::TrayNotification, // tray notification
-
+    
     #[nwg_control(parent: popup_window, popup: true)]
     edit_menu: nwg::Menu, // tray menu
     
@@ -162,6 +187,52 @@ pub struct PassToolApp {
 }
 
 impl PassToolApp {
+    fn generate_password(&self) {
+        //use generator;
+        let letters = self.include_letters.check_state() == CheckBoxState::Checked;
+        let digits = self.include_digits.check_state() == CheckBoxState::Checked;
+        let special = self.include_special.check_state() == CheckBoxState::Checked;
+
+        if !letters && !digits && !special {
+            nwg::modal_error_message(self.generate_password_window.handle, "Warning!", "Choose at least one option!");
+            return;
+        }
+
+        if self.password_len.len() == 0{
+            nwg::modal_error_message(self.generate_password_window.handle, "Warning!", "Enter password length!");
+            return;
+        }
+                
+        let len: u16 = self.password_len.text().parse().unwrap();
+        let password = generator::generate_password(len, letters, digits, special);
+        nwg::Clipboard::set_data_text(self.generate_password_window.handle, &password);
+        self.generate_password_window.set_visible(false);
+        nwg::modal_info_message(self.popup_window.handle, "Success!","Password saved into clipboard!");
+    }
+
+    fn show_generate_window(&self) {
+        self.password_label.set_text("Password");
+        let (x, y) = nwg::GlobalCursor::position();
+        self.generate_password_window.set_position(x, y);
+        self.generate_password_window.set_enabled(true);
+        self.generate_password_window.set_visible(true);
+    }
+
+    fn highlight_label(&self) {
+        //self.password_label.set
+        let (x,y) = nwg::GlobalCursor::local_position(self.password_label.handle, None);
+        let (x, y) = (x as u32, y as u32);
+        let size = self.password_label.size();
+        let (bx, by) = (size.0/8, size.1/5);
+        let label = self.password_label.text();
+        if x > bx && x < size.0 - by && y > by && y < size.1 - by {
+            if label == "Password" {self.password_label.set_text("Generate");}
+        }
+        else {
+            self.password_label.set_text("Password");
+        }
+    }
+
     fn add_app(&self) {
         let name = self.selected_password.borrow();
         if name.is_none() {return}

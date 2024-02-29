@@ -2,9 +2,9 @@ use rand::Rng;
 
 const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DIGITS: &[u8] = b"1234567890";
-const SPECIAL: &[u8] = b"?!.,;|@$#";
+const SPECIAL: &[u8] = b"!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
-pub fn generate_password(len: u8, letters: bool, digits: bool, special: bool) -> String {
+pub fn generate_password(len: u16, letters: bool, digits: bool, special: bool) -> String {
     let mut a = Vec::default();
     if letters {a.append(&mut Vec::from(LETTERS));}
     if digits {a.append(&mut Vec::from(DIGITS));}
