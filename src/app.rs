@@ -413,6 +413,7 @@ impl PassToolApp {
     }
 
     fn show_add_password(&self) {
+        self.password_label.set_text("Password:");
         let (x, y) = nwg::GlobalCursor::position();
         self.add_password_window.set_position(x, y);
         self.add_password_window.set_enabled(true);
