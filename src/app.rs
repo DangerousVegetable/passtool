@@ -211,7 +211,7 @@ impl PassToolApp {
     }
 
     fn show_generate_window(&self) {
-        self.password_label.set_text("Password");
+        self.password_label.set_text("Password:");
         let (x, y) = nwg::GlobalCursor::position();
         self.generate_password_window.set_position(x, y);
         self.generate_password_window.set_enabled(true);
@@ -226,10 +226,10 @@ impl PassToolApp {
         let (bx, by) = (size.0/8, size.1/5);
         let label = self.password_label.text();
         if x > bx && x < size.0 - by && y > by && y < size.1 - by {
-            if label == "Password" {self.password_label.set_text("Generate");}
+            if label == "Password:" {self.password_label.set_text("Generate");}
         }
         else {
-            self.password_label.set_text("Password");
+            self.password_label.set_text("Password:");
         }
     }
 
